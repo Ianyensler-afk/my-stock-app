@@ -32,17 +32,38 @@ def format_ticker(symbol):
 stock_id = format_ticker(ticker_input)
 
 # --- 3. 核心數據與指標計算 ---
+# --- 替換原本的 load_data 函數 ---
 @st.cache_data
 def load_data(symbol, period):
     try:
-        data = yf.download(symbol, period=period)
-        if isinstance(data.columns, pd.MultiIndex):
-            data.columns = data.columns.get_level_values(0)
+        # 改法 1: 使用 Ticker.history (更穩定)
+        stock = yf.Ticker(symbol)
+        data = stock.history(period=period)
+        
+        # 如果抓不到，嘗試加上 .TW 或移除 .TW 再試一次 (容錯機制)
+        if data.empty:
+            if ".TW" not in symbol:
+                data = yf.Ticker(f"{symbol}.TW").history(period=period)
+            else:
+                data = yf.Ticker(symbol.replace(".TW", "")).history(period=period)
+        
+        # 如果還是空的，回傳 None
+        if data.empty:
+            return None
+        
+        # 重設索引，讓 Date 變成一個欄位
         data.reset_index(inplace=True)
-        data['Date'] = pd.to_datetime(data['Date'])
+        
+        # 處理時區問題 (Yahoo 有時會回傳帶時區的日期，這會導致畫圖失敗)
+        data['Date'] = pd.to_datetime(data['Date']).dt.tz_localize(None)
+        
+        # 基本清洗
         data.dropna(subset=['Close'], inplace=True)
+        
         return data
-    except Exception:
+    except Exception as e:
+        # 在網頁上印出錯誤訊息，方便除錯 (Debug)
+        st.error(f"資料抓取失敗: {e}")
         return None
 
 def calculate_rsi(df, window=14):
@@ -457,4 +478,5 @@ if data is not None and not data.empty:
             st.warning("暫無相關新聞")
 
 else:
+
     st.error("查無資料，請確認代號。") #streamlit run app.py
